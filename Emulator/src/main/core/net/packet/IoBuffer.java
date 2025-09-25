@@ -634,6 +634,33 @@ public class IoBuffer {
     }
 
     /**
+     * Writes a JAG-compliant string.
+     */
+    public IoBuffer writeJagString(String str) {
+        for (int i = 0; i < str.length(); i++) {
+            this.p1(str.charAt(i));
+        }
+        this.p1(0);
+        return this;
+    }
+
+    /**
+     * Writes a single byte (same as p1, kept for Kotlin p1b equivalent).
+     */
+    public IoBuffer p1b(int value) {
+        return this.p1(value);
+    }
+
+    /**
+     * Writes a 2-byte value in big-endian order using two p1 calls.
+     */
+    public IoBuffer p2b(int value) {
+        this.p1((value >> 8) & 0xFF);
+        this.p1(value & 0xFF);
+        return this;
+    }
+
+    /**
      * Writes a null-terminated string.
      */
     public IoBuffer putString(String val) {

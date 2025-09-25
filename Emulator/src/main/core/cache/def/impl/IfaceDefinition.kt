@@ -588,5 +588,265 @@ class IfaceDefinition {
                 else -> {}
             }
         }
+
+        fun encode(def: IfaceDefinition): ByteArray {
+            val buffer = IoBuffer(-1, PacketHeader.NORMAL, ByteBuffer.allocate(1024))
+
+            when (def.version) {
+                1 -> encodeIf1(def, buffer)
+                3 -> encodeIf3(def, buffer)
+                else -> throw IllegalArgumentException("Unsupported version: ${def.version}")
+            }
+            return buffer.array()
+        }
+
+        private fun encodeIf1(def: IfaceDefinition, buffer: IoBuffer) {
+            buffer.p1(0)
+            buffer.p1(def.type!!.ordinal)
+            buffer.p1(def.buttonType)
+            buffer.p2(def.clientCode)
+            buffer.p2b(def.baseX)
+            buffer.p2b(def.baseY)
+            buffer.p2(def.baseWidth)
+            buffer.p2(def.baseHeight)
+            buffer.p1(def.alpha)
+            buffer.p2(if (def.overlayer == -1) 65535 else def.overlayer and 0xFFFF)
+            buffer.p2(def.unknownProp_11)
+
+            if (def.cs1ComparisonOperands != null && def.cs1ComparisonOperands!!.isNotEmpty()) {
+                buffer.p1(def.cs1ComparisonOperands!!.size)
+                for (i in def.cs1ComparisonOperands!!.indices) {
+                    buffer.p1(def.cs1ComparisonOpcodes!![i])
+                    buffer.p2(def.cs1ComparisonOperands!![i])
+                }
+            } else buffer.p1(0)
+
+            if (def.cs1Scripts != null && def.cs1Scripts!!.isNotEmpty()) {
+                buffer.p1(def.cs1Scripts!!.size)
+                for (script in def.cs1Scripts!!) {
+                    buffer.p2(script!!.size)
+                    for (s in script) buffer.p2(if (s == -1) 65535 else s)
+                }
+            } else buffer.p1(0)
+
+            when (def.type) {
+                ComponentType.SCROLLABLE -> {
+                    buffer.p2(def.scrollMaxH)
+                    buffer.p2(def.scrollMaxV)
+                    buffer.p1(if (def.noClickThrough) 1 else 0)
+                }
+
+                ComponentType.TEXT,
+                ComponentType.UNKNOWN_1 -> {
+                    buffer.p2(if (def.font == -1) 65535 else def.font)
+                    buffer.p1(def.vPadding)
+                    buffer.p1(def.halign)
+                    buffer.p1(def.valign)
+                    buffer.p1(if (def.shadowed) 1 else 0)
+                    buffer.p4(def.color)
+                    buffer.writeJagString(def.text ?: "")
+                    buffer.writeJagString(def.activeText ?: "")
+                    buffer.p4(def.activeColor)
+                    buffer.p4(def.overColor)
+                    buffer.p4(def.unknownColor)
+                }
+
+                ComponentType.FIGURE -> {
+                    buffer.p4(def.color)
+                    buffer.p1(if (def.filled) 1 else 0)
+                    buffer.p1(def.alpha)
+                }
+
+                ComponentType.SPRITE -> {
+                    buffer.p4(def.spriteId)
+                    buffer.p4(def.activeSpriteId)
+                }
+
+                ComponentType.MODEL -> {
+                    buffer.p2(if (def.modelId == -1) 65535 else def.modelId)
+                    buffer.p2(if (def.activeModelId == -1) 65535 else def.activeModelId)
+                    buffer.p2(if (def.modelAnimId == -1) 65535 else def.modelAnimId)
+                    buffer.p2(if (def.activeModelAnimId == -1) 65535 else def.activeModelAnimId)
+                    buffer.p2(def.modelZoom)
+                    buffer.p2(def.modelXAngle)
+                    buffer.p2(def.modelYAngle)
+                }
+
+                else -> {}
+            }
+
+            if (def.buttonType in listOf(1, 4, 5, 6)) {
+                buffer.writeJagString(
+                    def.option ?: when (def.buttonType) {
+                        1 -> "Ok"
+                        4, 5 -> "Select"
+                        6 -> "Continue"
+                        else -> ""
+                    }
+                )
+            }
+
+            def.invOptions?.forEach { buffer.writeJagString(it ?: "") }
+        }
+
+        private fun encodeIf3(def: IfaceDefinition, buffer: IoBuffer) {
+            buffer.p1(3)
+            buffer.p1(def.type!!.ordinal)
+            buffer.p2(def.clientCode)
+            buffer.p2b(def.baseX)
+            buffer.p2b(def.baseY)
+            buffer.p2(def.baseWidth)
+            buffer.p2(def.baseHeight)
+            buffer.p1b(def.dynWidth)
+            buffer.p1b(def.dynHeight)
+            buffer.p1b(def.yMode)
+            buffer.p1b(def.xMode)
+            buffer.p2(if (def.overlayer == -1) 65535 else def.overlayer and 0xFFFF)
+            buffer.p1(if (def.hidden) 1 else 0)
+
+            if (def.unknownIntArray_1 != null && def.unknownIntArray_1!!.isNotEmpty()) {
+                for (i in def.unknownIntArray_1!!.indices) {
+                    buffer.p2b(if (def.unknownIntArray_1!![i] == -1) 4095 else def.unknownIntArray_1!![i])
+                    buffer.p1b(def.unknownByteArray_2!![i].toInt())
+                    buffer.p1b(def.unknownByteArray_1!![i].toInt())
+                }
+            }
+
+            buffer.writeJagString(def.optionBase ?: "")
+
+            val opCount = def.ops?.size ?: 0
+            buffer.p1(opCount)
+            def.ops?.forEach { buffer.writeJagString(it ?: "") }
+
+            def.unknownIntArray_2?.forEach { buffer.p2(it) }
+
+            buffer.p1(def.dragDeadzone)
+            buffer.p1(def.dragDeadtime)
+            buffer.p1(if (def.dragRenderBehavior) 1 else 0)
+
+            buffer.writeJagString(def.opCircumfix ?: "")
+
+            buffer.p2(if (def.unknownProp_9 == -1) 65535 else def.unknownProp_9)
+            buffer.p2(if (def.unknownProp_10 == -1) 65535 else def.unknownProp_10)
+
+            def.scripts?.let { script ->
+                encodeScript(buffer, script.unknown)
+                encodeScript(buffer, script.onMouseOver)
+                encodeScript(buffer, script.onMouseLeave)
+                encodeScript(buffer, script.onUseWith)
+                encodeScript(buffer, script.onUse)
+                encodeScript(buffer, script.onVarpTransmit)
+                encodeScript(buffer, script.onInvTransmit)
+                encodeScript(buffer, script.onStatTransmit)
+                encodeScript(buffer, script.onTimer)
+                encodeScript(buffer, script.onOptionClick)
+                encodeScript(buffer, script.onMouseRepeat)
+                encodeScript(buffer, script.onClickRepeat)
+                encodeScript(buffer, script.onDrag)
+                encodeScript(buffer, script.onRelease)
+                encodeScript(buffer, script.onHold)
+                encodeScript(buffer, script.onDragStart)
+                encodeScript(buffer, script.onDragRelease)
+                encodeScript(buffer, script.onScroll)
+                encodeScript(buffer, script.onVarcTransmit)
+                encodeScript(buffer, script.onVarcstrTransmit)
+            }
+
+            def.triggers?.let { trigger ->
+                encodeTriggers(buffer, trigger.varpTriggers)
+                encodeTriggers(buffer, trigger.inventoryTriggers)
+                encodeTriggers(buffer, trigger.statTriggers)
+                encodeTriggers(buffer, trigger.varcTriggers)
+                encodeTriggers(buffer, trigger.varcstrTriggers)
+            }
+
+            when (def.type) {
+                ComponentType.SPRITE -> {
+                    buffer.p4(def.spriteId)
+                    buffer.p2(def.angle2d)
+                    var spriteFlags = 0
+                    if (def.spriteTiling) spriteFlags = spriteFlags or 0x1
+                    if (def.hasAlpha) spriteFlags = spriteFlags or 0x2
+                    buffer.p1(spriteFlags)
+                    buffer.p1(def.alpha)
+                    buffer.p1(def.outlineThickness)
+                    buffer.p4(def.shadowColor)
+                    buffer.p1(if (def.vFlip) 1 else 0)
+                    buffer.p1(if (def.hFlip) 1 else 0)
+                }
+                ComponentType.MODEL -> {
+                    buffer.p2(if (def.modelId == -1) 65535 else def.modelId)
+                    buffer.p2(if (def.activeModelId == -1) 65535 else def.activeModelId)
+                    buffer.p2(if (def.modelAnimId == -1) 65535 else def.modelAnimId)
+                    buffer.p2(if (def.activeModelAnimId == -1) 65535 else def.activeModelAnimId)
+                    buffer.p2(def.modelZoom)
+                    buffer.p2(def.modelXAngle)
+                    buffer.p2(def.modelYAngle)
+                    buffer.p2(def.modelYOffset)
+                    buffer.p1(if (def.modelOrtho) 1 else 0)
+                    buffer.p2(def.unknownModelProp_1)
+                    buffer.p2(def.unknownModelProp_2)
+                    buffer.p2(def.unknownModelProp_3)
+                    buffer.p2(def.unknownModelProp_4)
+                    buffer.p1(if (def.unknownModelProp_5) 1 else 0)
+                    buffer.p2(def.unknownModelProp_6)
+                    buffer.p2(def.unknownModelProp_7)
+                }
+                ComponentType.TEXT -> {
+                    buffer.p2(if (def.font == -1) 65535 else def.font)
+                    buffer.writeJagString(def.text ?: "")
+                    buffer.p1(def.vPadding)
+                    buffer.p1(def.halign)
+                    buffer.p1(def.valign)
+                    buffer.p1(if (def.shadowed) 1 else 0)
+                    buffer.p4(def.color)
+                    buffer.writeJagString(def.activeText ?: "")
+                    buffer.p4(def.activeColor)
+                    buffer.p4(def.overColor)
+                    buffer.p4(def.unknownColor)
+                }
+                ComponentType.FIGURE -> {
+                    buffer.p4(def.color)
+                    buffer.p1(if (def.filled) 1 else 0)
+                    buffer.p1(def.alpha)
+                }
+                ComponentType.SCROLLABLE -> {
+                    buffer.p2(def.scrollMaxH)
+                    buffer.p2(def.scrollMaxV)
+                    buffer.p1(if (def.noClickThrough) 1 else 0)
+                }
+                ComponentType.UNKNOWN_9 -> {
+                    buffer.p1(def.lineWidth)
+                    buffer.p4(def.color)
+                    buffer.p1(if (def.unknownProp_8) 1 else 0)
+                }
+                else -> {}
+            }
+        }
+
+        private fun encodeScript(buffer: IoBuffer, script: ScriptArgs?) {
+            if (script == null) {
+                buffer.p1(0)
+                return
+            }
+
+            val args = script.args
+            buffer.p1(args.size)
+            for (arg in args) {
+                when (arg) {
+                    is Int -> buffer.p1(0).p4(arg)
+                    is String -> buffer.p1(1).writeJagString(arg)
+                }
+            }
+        }
+
+        private fun encodeTriggers(buffer: IoBuffer, triggers: IntArray?) {
+            if (triggers == null) {
+                buffer.p1(0)
+                return
+            }
+            buffer.p1(triggers.size)
+            for (t in triggers) buffer.p4(t)
+        }
     }
 }
